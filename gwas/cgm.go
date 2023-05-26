@@ -101,6 +101,8 @@ func FederatedCGM(cps *crypto.CryptoParams, mpcObjs *mpc.ParallelMPC, eta []floa
 		delta_new = crypto.InnerProd(cps, r, r)
 		beta := crypto.Mult(cps, delta_new, cInvert(cps, delta_old))
 		y = crypto.CAdd(cps, r, crypto.CMultConst(cps, y, beta, false))
+
+		// TODO the hub party needs to send the new values of x, y, r, delta_new out to all the other parties too
 	}
 	return x
 }
