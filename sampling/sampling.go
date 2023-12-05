@@ -9,6 +9,7 @@ import (
 	"github.com/ldsec/lattigo/v2/ckks"
 
 	"gonum.org/v1/gonum/stat/distuv"
+	"go.dedis.ch/onet/v3/log"
 )
 
 // TODO the below functions have equivalents in crypto/basics.go, but I have my own dummy implementations pending understanding how to choose the Intervals/the possibility such functions will be rewritten
@@ -45,9 +46,9 @@ func CSampleGamma(cps *crypto.CryptoParams, k float64, theta *ckks.Ciphertext) *
 	// for our application, we apparently will only ever need to sample from gamma with public k and private theta, hence the specificity of this function
 	gammaDist := distuv.Gamma{Alpha: k, Beta: 1} // this is a different parameterization than the one we use, but they coincide in the standard form, with rate = scale = 1
 	sample := gammaDist.Rand()
-	// invoke the property that X ~ G(k, 1) -> X/theta ~ G(k, theta)
-	inv_theta := cInvert(cps, theta)
-	return crypto.CMultConst(cps, crypto.CipherVector{inv_theta}, sample, false)[0]
+	// invoke the property that X ~ G(k, 1) -> thetaX ~ G(k, theta)
+	// inv_theta := cInvert(cps, theta)
+	return crypto.CMultConst(cps, crypto.CipherVector{theta}, sample, false)[0]
 }
 
 // for k >= 1, generates a sample from the Gamma distribution with parameters `k, theta`.
@@ -142,6 +143,8 @@ func CSampleGeneralizedInverseGaussian(cps *crypto.CryptoParams, mpcObjs *mpc.Pa
 
 // sample from an inverse Gaussian distribution with parameters mu/lambda using the algorithm of Michael, Schucany, and Haas 1976
 func CSampleInverseGaussian(cps *crypto.CryptoParams, mpcObjs *mpc.ParallelMPC, mu, lambda *ckks.Ciphertext) *ckks.Ciphertext {
+	// TODO bugfix, we're currently yielding impossibly massive samples
+	// TODO reply: it's almost certainly due to exhausting Levels, so we need to throw in a bootstrap somewhere
 	mpcObj := (*mpcObjs)[0]
 	pid := mpcObj.GetPid()
 	rtype := mpcObj.GetRType().Zero()
@@ -164,9 +167,13 @@ func CSampleInverseGaussian(cps *crypto.CryptoParams, mpcObjs *mpc.ParallelMPC, 
 	final_term := crypto.CAddConst(cps, crypto.CipherVector{divided_term}, 1)[0]
 	x := crypto.Mult(cps, mu, final_term)
 
+	log.LLvl1("Sampling finished, now checking boundary condition")
+
 	threshold_value := crypto.Add(cps, x, mu)
 	threshold_value = cInvert(cps, threshold_value)
 	threshold_value = crypto.Mult(cps, mu, threshold_value)
+
+	// TODO replace below with dummy decrypt comparison
 
 	// we now need to return a certain value with probability (mu/(mu + x)), which cannot be done homomorphically (or at least not that easily)
 	// so we must now convert the homomorphically encrypted value into a secret-shared one such that we can invoke an MPC protocol for evaluating less-than
@@ -178,6 +185,9 @@ func CSampleInverseGaussian(cps *crypto.CryptoParams, mpcObjs *mpc.ParallelMPC, 
 	// as an aside, there might be a way to parallelize many samples if we can somehow do a LessThanPublic where it's a vector of public values to compare against
 	outcome := mpcObj.LessThanPublic(secret_shared, z_ring, true)
 	outcome = mpcObj.RevealSymVec(outcome)
+
+	
+	log.LLvl1("Continuing...")
 
 	if outcome[0].Uint64() == 0 { // ie that z <= threshold_value
 		return x

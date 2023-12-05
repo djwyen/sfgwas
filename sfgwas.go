@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strconv"
 	"time"
+	// "math"
 
 	mpc_core "github.com/hhcho/mpc-core"
 
@@ -22,6 +23,9 @@ import (
 
 	// "gonum.org/v1/gonum/stat"
 	"gonum.org/v1/gonum/stat/distuv"
+	"gonum.org/v1/gonum/mat"
+
+	// "github.com/hhcho/sfgwas-private/sampling"
 )
 
 // Expects a party ID provided as an environment variable;
@@ -82,8 +86,15 @@ func RunGWAS() {
 	}
 	defer stopFn()
 
+	value := 1.0e-4
+	log.LLvl1(fmt.Sprintf("Float is %g", value))
+	a := crypto.EncryptFloat(prot.GetCryptoParams(), value)
+	b := prot.GetMpc()[0].Network.CollectiveDecrypt(prot.GetCryptoParams(), a, prot.GetMpc()[0].GetPid())
+	// b := crypto.DecryptFloat(prot.GetCryptoParams(), a)
+	log.LLvl1(fmt.Sprintf("Float is %g", b))
+
 	// Run protocol
-	prot.GWAS()
+	// prot.GWAS()
 
 	prot.SyncAndTerminate(true)
 }
@@ -310,6 +321,24 @@ func (g *ToyProtocolInfo) SampleCollaboratively() {
 	}
 }
 
+// func (g *ToyProtocolInfo) CGMWrapper() {
+// 	log.LLvl1(time.Now().Format(time.RFC3339), "Starting collaborative sampling protocol")
+// 	net := g.mpcObj.GetNetworks()
+// 	// mpc := g.mpcObj[0]
+// 	// pid := mpc.GetPid()
+
+// 	net.ResetNetworkLog()
+// 	log.LLvl1(time.Now().Format(time.RFC3339), "Running CGM")
+
+// 	eta := []float64{1.0, 2.0}
+// 	D := crypto.EncodeDense(g.cps, mat.NewDense(2, 2, []float64{1.0, 1.0, 1.0, 1.0}))
+// 	Psi_inv, _ := crypto.EncryptFloatVector(g.cps, []float64{2.0, 1.0})
+// 	sigma2 := crypto.EncryptFloat(g.cps, 1.0)
+
+// 	soln := gwas.FederatedCGM(g.cps, &g.mpcObj, eta, D, Psi_inv, sigma2, 1, 0, 2)
+// 	log.LLvl1(fmt.Sprintf("Final value is", crypto.DecryptFloatVector(g.cps, soln, 2)))
+// }
+
 // we will be using the gwas config .toml files since they're already there, but note that they will contain a lot of GWAS-specific information which we won't need for anything.
 func InitializeToyProtocol(configPath string) (prot *ToyProtocolInfo) {
 	config := new(gwas.Config)
@@ -449,7 +478,7 @@ func runPlayground() {
 	// Run protocol
 	log.LLvl1("collaboratively sampling from a particular distribution")
 	prot.SampleCollaboratively()
-
+	// prot.CGMWrapper()
 
 	prot.SyncAndTerminate(true)
 }
@@ -462,6 +491,82 @@ func playground() {
 
 	// get rotation keys
 	selfParams.SetRotKeys(crypto.GenerateRotKeys(selfParams.GetSlots(), 20, true))
+	// fmt.Println(selfParams.GetSlots())
+
+	c1, _ := crypto.EncryptFloatVector(selfParams, []float64{2.0, 3.0, 4.0, -2.0})
+	// c2, _ := crypto.EncryptFloatVector(selfParams, []float64{1.0, 4.0, 2.0, 2.0})
+	c3 := crypto.InnerSumAll(selfParams, c1)
+	c4 := crypto.InnerSum(selfParams, c1, 4)
+	// c4 := crypto.InnerSumAll(selfParams, c2)
+
+	fmt.Printf("decrypted:", crypto.DecryptFloatVector(selfParams, crypto.CipherVector{crypto.Rebalance(selfParams, c3)}, 6))
+	fmt.Printf("decrypted:", crypto.DecryptFloatVector(selfParams, crypto.CipherVector{c4}, 6))
+
+	log.LLvl1(time.Now().Format(time.RFC3339), "Running CGM")
+
+	eta := []float64{1.0, 2.0}
+	D := crypto.EncodeDense(selfParams, mat.NewDense(2, 2, []float64{1.0, 1.0, 1.0, 1.0}))
+	Psi_inv, _ := crypto.EncryptFloatVector(selfParams, []float64{3.0, 2.0})
+	sigma2 := crypto.EncryptFloat(selfParams, 1.0)
+
+	soln := gwas.FederatedCGM(selfParams, eta, D, Psi_inv, sigma2, 1, 0, 2)
+	log.LLvl1(fmt.Sprintf("Final value is", crypto.DecryptFloatVector(selfParams, soln, 2)))
+
+	// a := 4.0
+	// theta := crypto.EncryptFloat(selfParams, 3)
+
+	// n_samples := 30
+	// sum := 0.0
+	// samples := make([]float64, n_samples)
+
+	// for i := 0; i < n_samples; i++ {
+	// 	sample := sampling.CSampleGamma(selfParams, a, theta)
+	// 	plaintext := crypto.DecryptFloat(selfParams, sample)
+	// 	sum += plaintext
+	// 	samples[i] = plaintext
+	// 	// fmt.Println(plaintext)
+	// }
+
+	// // compute mean
+	// mean := sum / float64(n_samples)
+	// fmt.Println("the mean is", mean)
+	// // compute variance
+	// variance := 0.0
+	// for _, sample := range samples {
+	// 	variance += math.Pow(sample - mean, 2)
+	// }
+	// variance /= float64(n_samples)
+	// fmt.Println("the variance is", variance)
+
+	// prot := InitializeToyProtocol(CONFIG_PATH)
+	// cp := prot.cps
+
+	// mu := crypto.EncryptFloat(cp, 3)
+	// lambda := crypto.EncryptFloat(cp, 1)
+	
+	// n_samples := 10
+	// sum := 0.0
+	// samples := make([]float64, n_samples)
+	// for i := 0; i < n_samples; i++ {
+	// 	sample := sampling.CSampleInverseGaussian(cp, &prot.mpcObj, mu, lambda)
+	// 	plaintext := crypto.DecryptFloat(cp, sample)
+	// 	sum += plaintext
+	// 	samples[i] = plaintext
+	// 	fmt.Println("sample", i, plaintext)
+	// }
+
+	// // compute mean
+	// mean := sum / float64(n_samples)
+	// fmt.Println("the mean is", mean)
+	// // compute variance
+	// variance := 0.0
+	// for _, sample := range samples {
+	// 	variance += math.Pow(sample - mean, 2)
+	// }
+	// variance /= float64(n_samples)
+	// fmt.Println("the variance is", variance)
+
+
 
 	// multiply the matrices
 	// 1 2 5      -2  0
@@ -479,40 +584,40 @@ func playground() {
 	// 	{4, -1},
 	// 	{6, 5},
 	// }
-	I := [][]float64{
-		{1, 0, 0, 0},
-		{0, 1, 0, 0},
-		{0, 0, 1, 0},
-		{0, 0, 0, 1},
-	}
-	A := [][]float64{
-		{24, 19, 5, 18},
-		{22, 34, 9, -23},
-		{8, 0, -8, 0},
-		{0, -4, -18, 14},
-	}
-	B := [][]float64{
-		{3, -4, 23, 10},
-		{2, -1, -8, 0},
-		{-5, 0, 4, -2},
-		{5, -9, 1, 3},
-	}
-	B = transposeMatrix(B)
-	n := len(B)
+	// I := [][]float64{
+	// 	{1, 0, 0, 0},
+	// 	{0, 1, 0, 0},
+	// 	{0, 0, 1, 0},
+	// 	{0, 0, 0, 1},
+	// }
+	// A := [][]float64{
+	// 	{24, 19, 5, 18},
+	// 	{22, 34, 9, -23},
+	// 	{8, 0, -8, 0},
+	// 	{0, -4, -18, 14},
+	// }
+	// B := [][]float64{
+	// 	{3, -4, 23, 10},
+	// 	{2, -1, -8, 0},
+	// 	{-5, 0, 4, -2},
+	// 	{5, -9, 1, 3},
+	// }
+	// B = transposeMatrix(B)
+	// n := len(B)
 
-	encA := encryptMatrixByRows(selfParams, A)
-	encB := encryptMatrixByRows(selfParams, B)
-	encI := encryptMatrixByRows(selfParams, I)
+	// encA := encryptMatrixByRows(selfParams, A)
+	// encB := encryptMatrixByRows(selfParams, B)
+	// encI := encryptMatrixByRows(selfParams, I)
 
-	// sanity check
-	fmt.Println(decryptMatrixVectorByRows(selfParams, encA, n))
-	fmt.Println(decryptMatrixVectorByRows(selfParams, encB, n))
+	// // sanity check
+	// fmt.Println(decryptMatrixVectorByRows(selfParams, encA, n))
+	// fmt.Println(decryptMatrixVectorByRows(selfParams, encB, n))
 
-	encResult := CMatrixMultiply(selfParams, encA, encB, n)
-	plainResult := decryptMatrixVectorByRows(selfParams, encResult, n)
-	fmt.Println(plainResult)
-	fmt.Println(decryptMatrixVectorByRows(selfParams, CMatrixMultiply(selfParams, encA, encI, n), n))
-	fmt.Println(decryptMatrixVectorByRows(selfParams, CMatrixMultiply(selfParams, encI, encB, n), n))
+	// encResult := CMatrixMultiply(selfParams, encA, encB, n)
+	// plainResult := decryptMatrixVectorByRows(selfParams, encResult, n)
+	// fmt.Println(plainResult)
+	// fmt.Println(decryptMatrixVectorByRows(selfParams, CMatrixMultiply(selfParams, encA, encI, n), n))
+	// fmt.Println(decryptMatrixVectorByRows(selfParams, CMatrixMultiply(selfParams, encI, encB, n), n))
 
 	// crucially the granularity on RotateAndAdd is powers of 2: that is to say, you can only request that it sum the indices 0 through 2^k. Any upper index greater than 2^k returns the same value as 2^k+1. (Up to minor fluctuations induced by the "empty" slots having extremely small values in them.) Check the algorithm for RotateAndAdd for details.
 	// the upshot is that if you want to say sum just the first n indices of a vector, then you should mask the vector first (with MaskTrunc)

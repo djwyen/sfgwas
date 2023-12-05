@@ -69,9 +69,7 @@ func FederatedCGM(cps *crypto.CryptoParams, eta []float64, LDshare crypto.PlainM
 		panic(fmt.Sprintf("LD Share has dimension %dx%d but eta has length %d", len(LDshare), len(LDshare), n))
 	}
 
-	// x := crypto.CZeros(cps, 1) // TODO a lot of bugs stem from this — the int parameter is the # of ciphertexts, not the number of encrypted items
-	x, _ := crypto.EncryptFloatVector(cps, []float64{2.0, 1.0}) // TODO a lot of bugs stem from this — the int parameter is the # of ciphertexts, not the number of encrypted items
-	y, _ := crypto.EncryptFloatVector(cps, eta)
+	x, _ := crypto.EncryptFloatVector(cps, []float64{2.0, 1.0})
 
 	// initialization aggregation of values
 	Ax_plus := crypto.CZeros(cps, 1)
@@ -99,13 +97,10 @@ func FederatedCGM(cps *crypto.CryptoParams, eta []float64, LDshare crypto.PlainM
 	Ax_star := crypto.CMult(cps, Psi_inv, x)
 	log.LLvl1("Value of Ax_plus:", crypto.DecryptFloatVector(cps, Ax_plus, n), "level", Ax_plus[0].Level())
 	log.LLvl1("Value of Ax_star:", crypto.DecryptFloatVector(cps, Ax_star, n), "level", Ax_star[0].Level())
-	// TODO somehow send out and aggregate the LD shares
 	Ax := crypto.CAdd(cps, Ax_plus, Ax_star)
 	log.LLvl1("Value of Ax:", crypto.DecryptFloatVector(cps, Ax, n), "level", Ax[0].Level())
-	// crypto.CMultConst(cps, u, N, true)
-	// log.LLvl1("Value of u:", crypto.DecryptFloatVector(cps, u, n))
-	// crypto.CMultConst(cps, u, cInvert(cps, sigma2), true)
-	// log.LLvl1("Value of u:", crypto.DecryptFloatVector(cps, u, n))
+	
+	y, _ := crypto.EncryptFloatVector(cps, eta)
 	y = crypto.CSub(cps, y, Ax)
 	r := y
 	delta_new := crypto.InnerProd(cps, r, r)
@@ -171,32 +166,51 @@ func FederatedCGM(cps *crypto.CryptoParams, eta []float64, LDshare crypto.PlainM
 		// crypto.CMultConst(cps, u, cInvert(cps, sigma2), true)
 		// log.LLvl1("Value of u:", crypto.DecryptFloatVector(cps, u, n))
 
-		denom := crypto.InnerProd(cps, y, u)
-		denom = crypto.CRescale(cps, crypto.CipherVector{denom})[0]
-
-		alpha := crypto.Mult(cps, delta_new, cInvert(cps, denom))
-		alpha = floodScalar(cps, alpha)
-		alpha = crypto.CRescale(cps, crypto.CipherVector{alpha})[0]
-		log.LLvl1("Value of alpha:", crypto.DecryptFloat(cps, alpha), "level", alpha.Level())
-		// tmp1 := crypto.CMultConst(cps, y, alpha, false)
-		alpha_y := crypto.CMultScalar(cps, y, alpha)
-		alpha_y = crypto.CRescale(cps, alpha_y)
-		log.LLvl1("Value of alpha_y:", crypto.DecryptFloatVector(cps, alpha_y, n), "level", alpha_y[0].Level())
-		// alpha_y1 := crypto.CRescale(cps, alpha_y)
-		// log.LLvl1("Value of alpha_y1:", crypto.DecryptFloatVector(cps, alpha_y1, n), "level", alpha_y1[0].Level())
-		// alpha_y11, _ := crypto.EncryptFloatVector(cps, crypto.DecryptFloatVector(cps, alpha_y, n))
-		// log.LLvl1("Value of alpha_y11:", crypto.DecryptFloatVector(cps, alpha_y11, n), "level", alpha_y11[0].Level())
-
-		// foo, _ := crypto.EncryptFloatVector(cps, []float64{0.25, 0.25})
-		// tmp4 := crypto.CMultScalar(cps, y, foo[0]) // debug stuff
-		x = crypto.CAdd(cps, x, alpha_y)
+		// TODO bugfix: this I think the issue is that we haven't flooded some of the scalars that we should, and so the non-0th slots are not getting the right values
+		alpha_denom := crypto.InnerProd(cps, y, u)
+		alpha_denom = floodScalar(cps, alpha_denom)
+		alpha_denom = crypto.CRescale(cps, crypto.CipherVector{alpha_denom})[0]
+		log.LLvl1("Value of alpha_denom:", crypto.DecryptFloat(cps, alpha_denom), "level", alpha_denom.Level())
+		inv_alpha_denom := cInvert(cps, alpha_denom)
+		
+		delta_new_y := crypto.CMultScalar(cps, y, delta_new)
+		alpha_denom_x := crypto.CMultScalar(cps, x, alpha_denom)
+		log.LLvl1("Value of delta_new_y:", crypto.DecryptFloatVector(cps, delta_new_y, n), "level", delta_new_y[0].Level())
+		log.LLvl1("Value of alpha_denom_x:", crypto.DecryptFloatVector(cps, alpha_denom_x, n), "level", alpha_denom_x[0].Level())
+		x = crypto.CMultScalar(cps, crypto.CAdd(cps, delta_new_y, alpha_denom_x), inv_alpha_denom)
 		x = crypto.CRescale(cps, x)
+
+
+		// alpha := crypto.Mult(cps, delta_new, cInvert(cps, alpha_denom))
+		// alpha = floodScalar(cps, alpha)
+		// alpha = crypto.CRescale(cps, crypto.CipherVector{alpha})[0]
+		// log.LLvl1("Value of alpha:", crypto.DecryptFloat(cps, alpha), "level", alpha.Level())
+		// // tmp1 := crypto.CMultConst(cps, y, alpha, false)
+		// alpha_y := crypto.CMultScalar(cps, y, alpha)
+		// alpha_y = crypto.CRescale(cps, alpha_y)
+		// log.LLvl1("Value of alpha_y:", crypto.DecryptFloatVector(cps, alpha_y, n), "level", alpha_y[0].Level())
+		// // alpha_y1 := crypto.CRescale(cps, alpha_y)
+		// // log.LLvl1("Value of alpha_y1:", crypto.DecryptFloatVector(cps, alpha_y1, n), "level", alpha_y1[0].Level())
+		// // alpha_y11, _ := crypto.EncryptFloatVector(cps, crypto.DecryptFloatVector(cps, alpha_y, n))
+		// // log.LLvl1("Value of alpha_y11:", crypto.DecryptFloatVector(cps, alpha_y11, n), "level", alpha_y11[0].Level())
+		
+		// // foo, _ := crypto.EncryptFloatVector(cps, []float64{0.25, 0.25})
+		// // tmp4 := crypto.CMultScalar(cps, y, foo[0]) // debug stuff
+		// x = crypto.CAdd(cps, x, alpha_y)
+		// x = crypto.CRescale(cps, x)
 		log.LLvl1("Value of x:", crypto.DecryptFloatVector(cps, x, n), "level", x[0].Level())
+
+
+		delta_new_u := crypto.CMultScalar(cps, u, delta_new)
+		alpha_denom_r := crypto.CMultScalar(cps, r, alpha_denom)
+		r = crypto.CMultScalar(cps, crypto.CSub(cps, alpha_denom_r, delta_new_u), inv_alpha_denom)
+
+
 		// tmp2 := crypto.CMultConst(cps, u, alpha, false)
-		alpha_u := crypto.CMultScalar(cps, u, alpha)
-		alpha_u = crypto.CRescale(cps, alpha_u)
-		log.LLvl1("Value of alpha_u:", crypto.DecryptFloatVector(cps, alpha_u, n), "level", alpha_u[0].Level())
-		r = crypto.CSub(cps, r, alpha_u)
+		// alpha_u := crypto.CMultScalar(cps, u, alpha)
+		// alpha_u = crypto.CRescale(cps, alpha_u)
+		// log.LLvl1("Value of alpha_u:", crypto.DecryptFloatVector(cps, alpha_u, n), "level", alpha_u[0].Level())
+		// r = crypto.CSub(cps, r, alpha_u)
 		r = crypto.CRescale(cps, r)
 		log.LLvl1("Value of r:", crypto.DecryptFloatVector(cps, r, n), "level", r[0].Level())
 		delta_old := delta_new
@@ -209,17 +223,22 @@ func FederatedCGM(cps *crypto.CryptoParams, eta []float64, LDshare crypto.PlainM
 		delta_new = crypto.CRescale(cps, crypto.CipherVector{delta_new})[0]
 		log.LLvl1("Value of delta_new:", crypto.DecryptFloat(cps, delta_new), "level", delta_new.Level())
 
-		beta := crypto.Mult(cps, delta_new, cInvert(cps, delta_old))
-		beta = floodScalar(cps, beta)
-		beta = crypto.CRescale(cps, crypto.CipherVector{beta})[0]
-		// TODO bugfix line below:
-		beta = crypto.EncryptFloat(cps, 0.0088)
-		log.LLvl1("Value of beta:", crypto.DecryptFloat(cps, beta), "level", beta.Level())
-		// tmp3 := crypto.CMultConst(cps, y, beta, false)
-		beta_y := crypto.CMultScalar(cps, y, beta)
-		beta_y = crypto.CRescale(cps, beta_y)
-		log.LLvl1("Value of beta_y:", crypto.DecryptFloatVector(cps, beta_y, n), "level", beta_y[0].Level())
-		y = crypto.CAdd(cps, r, beta_y)
+		new_delta_new_y := crypto.CMultScalar(cps, y, delta_new)
+		delta_old_r := crypto.CMultScalar(cps, r, delta_old)
+		y = crypto.CMultScalar(cps, crypto.CAdd(cps, delta_old_r, new_delta_new_y), cInvert(cps, delta_old))
+
+
+		// beta := crypto.Mult(cps, delta_new, cInvert(cps, delta_old))
+		// beta = floodScalar(cps, beta)
+		// beta = crypto.CRescale(cps, crypto.CipherVector{beta})[0]
+		// // TODO bugfix line below:
+		// beta = crypto.EncryptFloat(cps, 0.0088)
+		// log.LLvl1("Value of beta:", crypto.DecryptFloat(cps, beta), "level", beta.Level())
+		// // tmp3 := crypto.CMultConst(cps, y, beta, false)
+		// beta_y := crypto.CMultScalar(cps, y, beta)
+		// beta_y = crypto.CRescale(cps, beta_y)
+		// log.LLvl1("Value of beta_y:", crypto.DecryptFloatVector(cps, beta_y, n), "level", beta_y[0].Level())
+		// y = crypto.CAdd(cps, r, beta_y)
 		y = crypto.CRescale(cps, y)
 		log.LLvl1("Value of y:", crypto.DecryptFloatVector(cps, y, n), "level", y[0].Level())
 
